@@ -1,4 +1,3 @@
-
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
@@ -56,6 +55,28 @@ class MealPlanGenerator:
         self.week_start.set(monday.strftime("%d.%m.%y"))
         self.week_end.set(sunday.strftime("%d.%m.%y"))
     
+    def previous_week(self):
+        """Set previous week"""
+        try:
+            current_start = datetime.strptime(self.week_start.get(), "%d.%m.%y")
+            new_start = current_start - timedelta(days=7)
+            new_end = new_start + timedelta(days=6)
+            self.week_start.set(new_start.strftime("%d.%m.%y"))
+            self.week_end.set(new_end.strftime("%d.%m.%y"))
+        except ValueError:
+            self.set_current_week()
+    
+    def next_week(self):
+        """Set next week"""
+        try:
+            current_start = datetime.strptime(self.week_start.get(), "%d.%m.%y")
+            new_start = current_start + timedelta(days=7)
+            new_end = new_start + timedelta(days=6)
+            self.week_start.set(new_start.strftime("%d.%m.%y"))
+            self.week_end.set(new_end.strftime("%d.%m.%y"))
+        except ValueError:
+            self.set_current_week()
+    
     def setup_page1(self):
         """Configuration page"""
         # Clear window
@@ -80,10 +101,20 @@ class MealPlanGenerator:
         ttk.Label(main_frame, text="Wochenspanne:", 
                  font=("Arial", 12, "bold")).grid(row=2, column=0, columnspan=4, pady=(20, 10))
         
-        ttk.Label(main_frame, text="Von:").grid(row=3, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main_frame, textvariable=self.week_start, width=12).grid(row=3, column=1, sticky=tk.W, padx=5)
-        ttk.Label(main_frame, text="Bis:").grid(row=3, column=2, sticky=tk.W, pady=5, padx=(20, 0))
-        ttk.Entry(main_frame, textvariable=self.week_end, width=12).grid(row=3, column=3, sticky=tk.W, padx=5)
+        # Week navigation frame
+        week_frame = ttk.Frame(main_frame)
+        week_frame.grid(row=3, column=0, columnspan=4, pady=5)
+        
+        ttk.Button(week_frame, text="◄ Vorherige Woche", 
+                  command=self.previous_week).grid(row=0, column=0, padx=5)
+        
+        ttk.Label(week_frame, text="Von:").grid(row=0, column=1, sticky=tk.W, pady=5, padx=(20, 5))
+        ttk.Entry(week_frame, textvariable=self.week_start, width=12).grid(row=0, column=2, sticky=tk.W, padx=5)
+        ttk.Label(week_frame, text="Bis:").grid(row=0, column=3, sticky=tk.W, pady=5, padx=(20, 5))
+        ttk.Entry(week_frame, textvariable=self.week_end, width=12).grid(row=0, column=4, sticky=tk.W, padx=5)
+        
+        ttk.Button(week_frame, text="Nächste Woche ►", 
+                  command=self.next_week).grid(row=0, column=5, padx=(20, 5))
         
         # Category rows configuration
         ttk.Label(main_frame, text="Anzahl Zeilen pro Kategorie:", 
@@ -208,15 +239,85 @@ class MealPlanGenerator:
             # Fallback to default categories if values are invalid
             categories = ["Frühstück", "Mittag-/Abendessen", "Snacks", "Nachtisch"]
         
-        # Table rows
+        # Table rows with dish numbers - column-wise numbering
         self.notes_entries = {}
+        self.notes_text_widgets = []  # For arrow key navigation
         
         for row_idx, category in enumerate(categories, 1):
             ttk.Label(scrollable_frame, text=category, font=("Arial", 10, "bold")).grid(row=row_idx, column=0, padx=2, pady=2, sticky="w")
-            for col_idx in range(1, 8):
-                entry = tk.Text(scrollable_frame, width=15, height=3)
-                entry.grid(row=row_idx, column=col_idx, padx=2, pady=2, sticky="ew")
+            for col_idx in range(1, 8):  # Days 1-7
+                # Create frame for text widget with background number
+                cell_frame = tk.Frame(scrollable_frame, relief="solid", bd=1, bg="white")
+                cell_frame.grid(row=row_idx, column=col_idx, padx=2, pady=2, sticky="ew")
+                
+                # Calculate dish number column-wise (by day first, then by category)
+                day_idx = col_idx - 1  # 0-6 for Monday-Sunday
+                category_idx = row_idx - 1  # 0-based category index
+                total_categories = len(categories)
+                dish_counter = (day_idx * total_categories) + category_idx + 1
+                
+                # Create a text widget with placeholder background text
+                entry = tk.Text(cell_frame, width=15, height=3, bg="white", wrap="word")
+                entry.pack(fill="both", expand=True)
+                
+                # Add dish number as placeholder text in the background
+                entry.insert("1.0", f"[{dish_counter}]\n\n")
+                entry.tag_add("dish_number", "1.0", "1.end")
+                entry.tag_config("dish_number", foreground="#cccccc", font=("Arial", 8))
+                
+                # Bind events to maintain dish number display
+                def on_focus_in(event, widget=entry, number=dish_counter):
+                    # Keep the dish number visible but allow editing after it
+                    current_content = widget.get("1.0", "end-1c")
+                    if not current_content.startswith(f"[{number}]"):
+                        widget.delete("1.0", "end")
+                        widget.insert("1.0", f"[{number}]\n\n")
+                        widget.tag_add("dish_number", "1.0", "1.end")
+                        widget.tag_config("dish_number", foreground="#cccccc", font=("Arial", 8))
+                        widget.mark_set("insert", "2.0")
+                
+                def on_key_press(event, widget=entry, number=dish_counter):
+                    # Prevent editing of the dish number line
+                    if widget.index("insert").split('.')[0] == "1":
+                        if event.keysym not in ["Down", "Right", "End"]:
+                            widget.mark_set("insert", "2.0")
+                            return "break"
+                
+                entry.bind("<FocusIn>", on_focus_in)
+                entry.bind("<KeyPress>", on_key_press)
+                
+                # Store for navigation
+                self.notes_text_widgets.append(entry)
                 self.notes_entries[f"{category}_{col_idx}"] = entry
+        
+        # Add arrow key navigation
+        def navigate_cells(event):
+            widget = event.widget
+            if widget in self.notes_text_widgets:
+                current_idx = self.notes_text_widgets.index(widget)
+                total_widgets = len(self.notes_text_widgets)
+                cols = 7  # 7 days
+                
+                if event.keysym == "Up" and event.state & 0x4:  # Ctrl+Up
+                    new_idx = current_idx - cols if current_idx >= cols else current_idx
+                elif event.keysym == "Down" and event.state & 0x4:  # Ctrl+Down
+                    new_idx = current_idx + cols if current_idx + cols < total_widgets else current_idx
+                elif event.keysym == "Left" and event.state & 0x4:  # Ctrl+Left
+                    new_idx = current_idx - 1 if current_idx > 0 else current_idx
+                elif event.keysym == "Right" and event.state & 0x4:  # Ctrl+Right
+                    new_idx = current_idx + 1 if current_idx < total_widgets - 1 else current_idx
+                else:
+                    return
+                
+                self.notes_text_widgets[new_idx].focus_set()
+                return "break"
+        
+        # Bind navigation to all text widgets
+        for widget in self.notes_text_widgets:
+            widget.bind("<Control-Up>", navigate_cells)
+            widget.bind("<Control-Down>", navigate_cells)
+            widget.bind("<Control-Left>", navigate_cells)
+            widget.bind("<Control-Right>", navigate_cells)
         
         # Configure scrollable frame
         for i in range(8):
@@ -226,7 +327,11 @@ class MealPlanGenerator:
         scrollbar_v.pack(side="right", fill="y")
         scrollbar_h.pack(side="bottom", fill="x")
         
-        # Close button
+        # Instructions and close button
+        info_frame = ttk.Frame(main_frame)
+        info_frame.pack(pady=5)
+        ttk.Label(info_frame, text="Tipp: Verwende Strg + Pfeiltasten zur Navigation zwischen den Zellen", 
+                 font=("Arial", 9), foreground="gray").pack()
         ttk.Button(main_frame, text="Schließen", command=notes_window.destroy).pack(pady=10)
     
     def toggle_sources_options(self):
@@ -237,8 +342,6 @@ class MealPlanGenerator:
         else:
             self.pdf1_entry.config(state='disabled')
             self.pdf2_entry.config(state='disabled')
-    
-    # ... keep existing code (browse_directory, validate_and_continue, generate_website_structure methods) the same ...
     
     def browse_directory(self):
         """Open directory selection dialog"""
@@ -302,13 +405,17 @@ class MealPlanGenerator:
         os.makedirs(os.path.join(website_dir, "media", "pdfs"), exist_ok=True)
         
         # Initialize dish names with default values - column-wise numbering
+        total_categories = sum(row_count for _, row_count in self.categories)
         dish_counter = 1
+        
         for day in range(7):  # 7 days
-            for category_name, row_count in self.categories:
+            for category_idx, (category_name, row_count) in enumerate(self.categories):
                 for row in range(row_count):
-                    self.dish_names[dish_counter] = f"Gericht {dish_counter}"
-                    self.empty_cells[dish_counter] = False
-                    dish_counter += 1
+                    # Column-wise numbering: (day * total_categories) + category_row_index + 1
+                    category_row_index = sum(prev_row_count for _, prev_row_count in self.categories[:category_idx]) + row
+                    dish_num = (day * total_categories) + category_row_index + 1
+                    self.dish_names[dish_num] = f"Gericht {dish_num}"
+                    self.empty_cells[dish_num] = False
         
         # Generate HTML
         html_content = self.generate_html()
@@ -322,8 +429,6 @@ class MealPlanGenerator:
             
         messagebox.showinfo("Erfolg", "Webseiten-Struktur wurde erstellt!")
     
-    # ... keep existing code (generate_html and generate_css methods) the same ...
-    
     def generate_html(self):
         """Generate HTML content based on configuration - column-wise numbering"""
         week_range = f"Woche: {self.week_start.get()} - {self.week_end.get()}"
@@ -334,7 +439,7 @@ class MealPlanGenerator:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Essensplan</title>
+    <title>Essensplan {week_range}</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -356,6 +461,11 @@ class MealPlanGenerator:
             <tbody>'''
         
         # Generate table with column-wise dish numbering
+        # Calculate total categories for proper numbering
+        total_categories = sum(row_count for _, row_count in self.categories)
+        
+        category_row_counter = 0  # Track current category row across all categories
+        
         for category_name, row_count in self.categories:
             for row in range(row_count):
                 # Only show category name in first row, leave others empty
@@ -369,14 +479,8 @@ class MealPlanGenerator:
                     <th>{category_display}</th>'''
                 
                 for day_idx in range(7):
-                    # Calculate dish number column-wise
-                    dish_counter = 1
-                    for prev_category_name, prev_row_count in self.categories:
-                        if prev_category_name == category_name:
-                            dish_counter += day_idx * prev_row_count + row
-                            break
-                        else:
-                            dish_counter += prev_row_count * 7
+                    # Calculate dish number column-wise (by day first, then by category)
+                    dish_counter = (day_idx * total_categories) + category_row_counter + 1
                     
                     day_name = days[day_idx]
                     dish_name = self.dish_names.get(dish_counter, f"Gericht {dish_counter}")
@@ -397,16 +501,25 @@ class MealPlanGenerator:
                     <td>
                         <span class="dish-name">{dish_name}</span>'''
                         
-                        if self.show_photos.get():
+                        # Check if photo path should be hidden
+                        photo_path = self.file_entries.get(dish_counter, {}).get("photo", tk.StringVar()).get() if hasattr(self, 'file_entries') else ""
+                        pdf_path = self.file_entries.get(dish_counter, {}).get("pdf", tk.StringVar()).get() if hasattr(self, 'file_entries') else ""
+                        
+                        if self.show_photos.get() and photo_path != "/":
                             html += f'''
                         <img src="media/photos/photo{dish_counter}.jpg" alt="{category_name} {day_name}">'''
                         
-                        html += f'''
-                        <a href="media/pdfs/recipe{dish_counter}.pdf" target="_blank">Rezept PDF</a>
+                        if pdf_path != "/":
+                            html += f'''
+                        <a href="media/pdfs/recipe{dish_counter}.pdf" target="_blank">Rezept PDF</a>'''
+                        
+                        html += '''
                     </td>'''
                     
                 html += '''
                 </tr>'''
+                
+                category_row_counter += 1  # Increment for next category row
         
         html += '''
             </tbody>
@@ -577,7 +690,7 @@ a:hover {
         test_button.grid(row=1, column=0, columnspan=6, pady=(0, 10))
         
         # Info about placeholder words
-        info_label = ttk.Label(main_frame, text="Hinweis: Eingaben wie 'kein', 'keine', 'nichts', '/', '-' werden als Platzhalter erkannt und nicht angezeigt",
+        info_label = ttk.Label(main_frame, text="Hinweis: Eingabe '/' wird als Platzhalter erkannt und blendet PDF/Foto Links aus",
                               font=("Arial", 9), foreground="gray", wraplength=800)
         info_label.grid(row=2, column=0, columnspan=6, pady=(0, 20))
         
@@ -628,12 +741,15 @@ a:hover {
         self.empty_checkboxes = {}
         self.input_widgets = {}
         
-        dish_counter = 1
+        total_categories = sum(row_count for _, row_count in self.categories)
         row_counter = 1
         
         for day in range(7):
-            for category_name, row_count in self.categories:
+            for category_idx, (category_name, row_count) in enumerate(self.categories):
                 for row in range(row_count):
+                    # Column-wise numbering: (day * total_categories) + category_row_index + 1
+                    category_row_index = sum(prev_row_count for _, prev_row_count in self.categories[:category_idx]) + row
+                    dish_counter = (day * total_categories) + category_row_index + 1
                     # Dish number
                     ttk.Label(scrollable_frame, text=f"Gericht {dish_counter}").grid(row=row_counter, column=0, padx=5, pady=2)
                     
@@ -703,7 +819,6 @@ a:hover {
                     if self.empty_cells[dish_counter]:
                         self.update_widget_state(dish_counter, disabled=True)
                     
-                    dish_counter += 1
                     row_counter += 1
         
         # Add sources section if enabled
@@ -762,8 +877,6 @@ a:hover {
         except Exception as e:
             messagebox.showerror("Fehler", f"Fehler beim Einfügen aus Zwischenablage: {str(e)}")
     
-    # ... keep existing code (toggle_all_empty, paste_from_clipboard, update_widget_state, toggle_empty_cell, open_website, open_project_folder, browse_pdf, browse_photo, browse_source_pdf methods) the same ...
-    
     def toggle_all_empty(self):
         """Toggle all empty checkboxes"""
         select_all = self.select_all_empty.get()
@@ -773,16 +886,29 @@ a:hover {
             self.update_widget_state(dish_num, disabled=select_all)
     
     def paste_from_clipboard(self, dish_num, var):
-        """Paste image from clipboard"""
+        """Paste image from clipboard - supports PNG and JPEG formats"""
         try:
             from PIL import ImageGrab
             img = ImageGrab.grabclipboard()
             if img:
-                # Save to temp location
+                # Determine format based on image mode and save appropriately
                 website_dir = self.website_path.get()
-                temp_path = os.path.join(website_dir, "media", "photos", f"temp_clipboard_{dish_num}.png")
-                os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-                img.save(temp_path)
+                
+                # Check if image has transparency (RGBA)
+                if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+                    # Save as PNG to preserve transparency
+                    temp_path = os.path.join(website_dir, "media", "photos", f"temp_clipboard_{dish_num}.png")
+                    os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+                    img.save(temp_path, "PNG")
+                else:
+                    # Save as JPEG for better file size
+                    temp_path = os.path.join(website_dir, "media", "photos", f"temp_clipboard_{dish_num}.jpg")
+                    os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+                    # Convert to RGB if necessary (JPEG doesn't support RGBA)
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    img.save(temp_path, "JPEG", quality=90)
+                
                 var.set(temp_path)
                 messagebox.showinfo("Erfolg", "Bild aus Zwischenablage eingefügt!")
             else:
@@ -856,20 +982,21 @@ a:hover {
             self.source_files[pdf_key].set(filename)
     
     def create_zip_file(self, website_dir):
-        """Create ZIP file of the project"""
+        """Create ZIP file of the project in the same directory as the website"""
         zip_filename = f"Essensplan_{self.week_start.get().replace('.', '_')}-{self.week_end.get().replace('.', '_')}.zip"
-        zip_path = os.path.join(os.path.dirname(website_dir), zip_filename)
+        zip_path = os.path.join(website_dir, zip_filename)  # Save in same directory as website
         
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for root, dirs, files in os.walk(website_dir):
                 for file in files:
+                    # Skip the ZIP file itself to avoid recursion
+                    if file == zip_filename:
+                        continue
                     file_path = os.path.join(root, file)
                     arc_name = os.path.relpath(file_path, website_dir)
                     zipf.write(file_path, arc_name)
         
         return zip_path
-    
-    # ... keep existing code (copy_files_and_finish method with minor updates) the same ...
     
     def copy_files_and_finish(self):
         """Copy and rename files to website directory"""
@@ -911,8 +1038,8 @@ a:hover {
                 pdf_path = files["pdf"].get()
                 photo_path = files["photo"].get()
                 
-                # Handle special placeholder paths
-                if pdf_path and pdf_path.lower() not in ["kein", "keine", "nichts", "/", "-"]:
+                # Handle special placeholder paths - only "/" now
+                if pdf_path and pdf_path != "/":
                     if os.path.exists(pdf_path):
                         dest_pdf = os.path.join(website_dir, "media", "pdfs", f"recipe{dish_num}.pdf")
                         if self.file_operation.get() == "copy":
@@ -920,8 +1047,8 @@ a:hover {
                         else:  # cut
                             shutil.move(pdf_path, dest_pdf)
                 
-                # Handle special placeholder paths for photos
-                if photo_path and photo_path.lower() not in ["kein", "keine", "nichts", "/", "-"]:
+                # Handle special placeholder paths for photos - only "/" now
+                if photo_path and photo_path != "/":
                     if os.path.exists(photo_path):
                         # Get file extension
                         _, ext = os.path.splitext(photo_path)
@@ -929,11 +1056,18 @@ a:hover {
                         if self.file_operation.get() == "copy":
                             shutil.copy2(photo_path, dest_photo)
                         else:  # cut
+                            # Delete old temp files if they exist before moving
+                            if "temp_clipboard_" in photo_path and self.file_operation.get() == "copy":
+                                self.cleanup_temp_files(website_dir)
                             shutil.move(photo_path, dest_photo)
                         
                         # If extension is not .jpg, update HTML to reflect correct extension
                         if ext.lower() != '.jpg':
                             self.update_html_for_image_extension(dish_num, ext)
+            
+            # Clean up temporary files in copy mode
+            if self.file_operation.get() == "copy":
+                self.cleanup_temp_files(website_dir)
             
             # Copy source PDFs if enabled
             if self.show_sources_box.get():
@@ -951,16 +1085,13 @@ a:hover {
                     else:
                         shutil.move(self.source_files["pdf2"].get(), dest_pdf2)
             
-            # Create ZIP file
-            zip_path = self.create_zip_file(website_dir)
-            
-            # Custom success dialog
-            self.show_success_dialog(website_dir, zip_path)
+            # Custom success dialog - no automatic ZIP creation
+            self.show_success_dialog(website_dir)
             
         except Exception as e:
             messagebox.showerror("Fehler", f"Fehler beim Kopieren der Dateien: {str(e)}")
     
-    def show_success_dialog(self, website_dir, zip_path):
+    def show_success_dialog(self, website_dir):
         """Show custom success dialog with all options"""
         success_dialog = tk.Toplevel(self.root)
         success_dialog.title("Erfolg")
@@ -979,9 +1110,6 @@ a:hover {
                  font=("Arial", 12, "bold"), foreground="green").pack(pady=(0, 10))
         
         ttk.Label(message_frame, text=f"Speicherort: {website_dir}", 
-                 font=("Arial", 9), wraplength=550).pack(pady=(0, 10))
-        
-        ttk.Label(message_frame, text=f"ZIP-Datei: {os.path.basename(zip_path)}", 
                  font=("Arial", 9), wraplength=550).pack(pady=(0, 20))
         
         # Buttons frame - organized in two rows
@@ -1007,16 +1135,24 @@ a:hover {
         ttk.Button(first_row, text="Website öffnen", 
                   command=self.open_website).pack(side=tk.LEFT, padx=(0, 10))
         
+        # Screenshot button
+        ttk.Button(first_row, text="Screenshot", 
+                  command=lambda: self.show_screenshot_dialog(website_dir)).pack(side=tk.LEFT, padx=(0, 10))
+        
         # Second row of buttons
         second_row = ttk.Frame(button_frame)
         second_row.pack()
         
-        # ZIP info button
-        def show_zip_info():
-            messagebox.showinfo("ZIP erstellt", f"ZIP-Datei wurde erstellt:\n{zip_path}")
+        # Create ZIP in same folder button
+        def create_zip_in_folder():
+            try:
+                zip_path_in_folder = self.create_zip_file(website_dir)
+                messagebox.showinfo("ZIP erstellt", f"ZIP-Datei wurde im Projektordner erstellt:\n{os.path.basename(zip_path_in_folder)}")
+            except Exception as e:
+                messagebox.showerror("Fehler", f"Fehler beim Erstellen der ZIP-Datei: {str(e)}")
         
-        ttk.Button(second_row, text="ZIP Info", 
-                  command=show_zip_info).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(second_row, text="ZIP im Projektordner erstellen", 
+                  command=create_zip_in_folder).pack(side=tk.LEFT, padx=(0, 10))
         
         # OK button
         def close_dialog():
@@ -1051,6 +1187,147 @@ a:hover {
                 
         except Exception as e:
             print(f"Warning: Could not update HTML for image extension: {e}")
+    
+    def cleanup_temp_files(self, website_dir):
+        """Clean up temporary clipboard files"""
+        try:
+            photos_dir = os.path.join(website_dir, "media", "photos")
+            if os.path.exists(photos_dir):
+                for filename in os.listdir(photos_dir):
+                    if filename.startswith("temp_clipboard_"):
+                        temp_file = os.path.join(photos_dir, filename)
+                        try:
+                            os.remove(temp_file)
+                        except OSError:
+                            pass  # File might already be moved/deleted
+        except Exception as e:
+            print(f"Warning: Could not clean up temp files: {e}")
+    
+    def show_screenshot_dialog(self, website_dir):
+        """Show screenshot options dialog"""
+        screenshot_dialog = tk.Toplevel(self.root)
+        screenshot_dialog.title("Screenshot Optionen")
+        screenshot_dialog.geometry("400x200")
+        screenshot_dialog.resizable(False, False)
+        
+        # Center the dialog
+        screenshot_dialog.transient(self.root)
+        screenshot_dialog.grab_set()
+        
+        main_frame = ttk.Frame(screenshot_dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(main_frame, text="Screenshot der HTML-Seite erstellen:", 
+                 font=("Arial", 12, "bold")).pack(pady=(0, 20))
+        
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(pady=10)
+        
+        def screenshot_to_clipboard():
+            try:
+                self.take_website_screenshot(website_dir, to_clipboard=True)
+                screenshot_dialog.destroy()
+                messagebox.showinfo("Erfolg", "Screenshot wurde in die Zwischenablage kopiert!")
+            except Exception as e:
+                messagebox.showerror("Fehler", f"Screenshot-Fehler: {str(e)}")
+        
+        def screenshot_to_file():
+            try:
+                save_path = filedialog.asksaveasfilename(
+                    title="Screenshot speichern als",
+                    defaultextension=".png",
+                    filetypes=[("PNG files", "*.png"), ("JPEG files", "*.jpg"), ("All files", "*.*")]
+                )
+                if save_path:
+                    self.take_website_screenshot(website_dir, save_path=save_path)
+                    screenshot_dialog.destroy()
+                    messagebox.showinfo("Erfolg", f"Screenshot wurde gespeichert: {save_path}")
+            except Exception as e:
+                messagebox.showerror("Fehler", f"Screenshot-Fehler: {str(e)}")
+        
+        ttk.Button(button_frame, text="In Zwischenablage", 
+                  command=screenshot_to_clipboard).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(button_frame, text="Als Datei speichern", 
+                  command=screenshot_to_file).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Button(button_frame, text="Abbrechen", 
+                  command=screenshot_dialog.destroy).pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Center the window
+        screenshot_dialog.update_idletasks()
+        x = (screenshot_dialog.winfo_screenwidth() // 2) - (screenshot_dialog.winfo_width() // 2)
+        y = (screenshot_dialog.winfo_screenheight() // 2) - (screenshot_dialog.winfo_height() // 2)
+        screenshot_dialog.geometry(f"+{x}+{y}")
+    
+    def take_website_screenshot(self, website_dir, to_clipboard=False, save_path=None):
+        """Take screenshot of the website"""
+        try:
+            # Install selenium and webdriver-manager if not available
+            try:
+                from selenium import webdriver
+                from selenium.webdriver.chrome.options import Options
+                from selenium.webdriver.common.by import By
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.support import expected_conditions as EC
+            except ImportError:
+                messagebox.showerror("Fehler", "Selenium ist nicht installiert.\nInstallieren Sie es mit: pip install selenium webdriver-manager")
+                return
+            
+            html_path = os.path.join(website_dir, "index.html")
+            if not os.path.exists(html_path):
+                raise Exception("HTML-Datei nicht gefunden!")
+            
+            # Setup Chrome options
+            chrome_options = Options()
+            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--window-size=1920,1080")
+            
+            # Create driver
+            driver = webdriver.Chrome(options=chrome_options)
+            
+            try:
+                # Load the HTML file
+                driver.get(f"file://{os.path.abspath(html_path)}")
+                
+                # Wait for page to load
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+                
+                # Take screenshot
+                if to_clipboard:
+                    # Save to temp file first, then copy to clipboard
+                    temp_path = os.path.join(website_dir, "temp_screenshot.png")
+                    driver.save_screenshot(temp_path)
+                    
+                    # Copy to clipboard using PIL
+                    from PIL import Image
+                    img = Image.open(temp_path)
+                    output = io.BytesIO()
+                    img.convert("RGB").save(output, "BMP")
+                    data = output.getvalue()[14:]
+                    output.close()
+                    
+                    import win32clipboard
+                    win32clipboard.OpenClipboard()
+                    win32clipboard.EmptyClipboard()
+                    win32clipboard.SetClipboardData(win32clipboard.CF_DIB, data)
+                    win32clipboard.CloseClipboard()
+                    
+                    # Clean up temp file
+                    os.remove(temp_path)
+                    
+                elif save_path:
+                    driver.save_screenshot(save_path)
+                    
+            finally:
+                driver.quit()
+                
+        except Exception as e:
+            raise Exception(f"Screenshot konnte nicht erstellt werden: {str(e)}")
 
 def main():
     root = tk.Tk()
@@ -1059,9 +1336,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-#Die Temp Datein müssen auch im kopieren modus gelöscht werden nachdem die Seite endgültig erstellt wurde, ansonsten sind die ja doppelt da. Beachte auch das man eine andere Datei aus der Zwischenablage nehmen kann bevor die seite endgültig erstellt wurde, in dies fall müssen dann trotzdem die alten tmep gelöscht werden nach dem eerstellen
-#Die Wörter / kein etc. funktionieren nicht um den PDF Link bzw. den Bild Blatzhalter komplett auszublenden, die bleiben bestzehen. Ich meine  damit dann eben das nur der Name z.B. Gericht 1 in der zelle steht wenn man die beiden sachen ausblendet
-#Im Notizen modus soll für die jewilige Zelle auch noch die Gerichts zahl stehen, nicht änderbar nur damit ich nachher weiß wie ich was zuordnern muss
-#Zu den Nummer dieser gerichte: momentan ist es so das die Nummer Zeilenweise hochzählen sprich von links nach rechts immer eine Ziffer hoch und dann die nächste Zeile, ich hätte aber lieber das Spalten weise von oben noch unten hochgezählt wird, sprich Montag Frühstück ist 1 und dann wäre immer nocj Montag aber dann Mittagessen die 2, weil ich die Sachen nach Wochentag eintragen würde dsas vieles erleichtern
-#Die ZIP (wenn man sie den am ende über die "Erfolg" seite erstellt) soll am Ende in dem selben Ordner wie die HTML. CSS und den Medien unterordner gepeichert sein, das macht alles etwas sortierter
