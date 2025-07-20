@@ -151,24 +151,19 @@ class MealPlanGenerator:
         # Show photos
         ttk.Checkbutton(main_frame, text="Fotos anzeigen", variable=self.show_photos).grid(row=12, column=0, columnspan=2, sticky=tk.W, pady=5)
         
-        # File operation setting
-        ttk.Label(main_frame, text="Datei-Operation:").grid(row=13, column=0, sticky=tk.W, pady=5)
-        file_op_frame = ttk.Frame(main_frame)
-        file_op_frame.grid(row=13, column=1, columnspan=3, sticky=tk.W, padx=5)
-        ttk.Radiobutton(file_op_frame, text="Kopieren", variable=self.file_operation, value="copy").grid(row=0, column=0, sticky=tk.W)
-        ttk.Radiobutton(file_op_frame, text="Ausschneiden", variable=self.file_operation, value="cut").grid(row=0, column=1, sticky=tk.W, padx=(20, 0))
+        # Removed file operation setting from page 1 - moved to page 2
         
         # Rename subfolder option
         ttk.Checkbutton(main_frame, text="Unterordner zu 'Essensplan [Zeitspanne]' umbenennen", 
-                       variable=self.rename_subfolder).grid(row=14, column=0, columnspan=4, sticky=tk.W, pady=5)
+                       variable=self.rename_subfolder).grid(row=13, column=0, columnspan=4, sticky=tk.W, pady=5)
         
         # Show sources box
         sources_checkbox = ttk.Checkbutton(main_frame, text="Download Links anzeigen", variable=self.show_sources_box, command=self.toggle_sources_options)
-        sources_checkbox.grid(row=15, column=0, columnspan=2, sticky=tk.W, pady=5)
+        sources_checkbox.grid(row=14, column=0, columnspan=2, sticky=tk.W, pady=5)
         
         # Source PDF names
         self.sources_frame = ttk.LabelFrame(main_frame, text="Download Links Namen", padding="10")
-        self.sources_frame.grid(row=16, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=10)
+        self.sources_frame.grid(row=15, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=10)
         
         ttk.Label(self.sources_frame, text="PDF 1:").grid(row=0, column=0, sticky=tk.W, pady=2)
         self.pdf1_entry = ttk.Entry(self.sources_frame, textvariable=self.source_pdf1_name, width=40)
@@ -182,10 +177,10 @@ class MealPlanGenerator:
         
         # Notes Mode Button
         ttk.Button(main_frame, text="Notizen-Modus öffnen", 
-                  command=self.open_notes_mode).grid(row=17, column=0, columnspan=2, pady=10, sticky=tk.W)
+                  command=self.open_notes_mode).grid(row=16, column=0, columnspan=2, pady=10, sticky=tk.W)
         
         # Continue button
-        ttk.Button(main_frame, text="Weiter", command=self.validate_and_continue).grid(row=18, column=1, pady=20)
+        ttk.Button(main_frame, text="Weiter", command=self.validate_and_continue).grid(row=17, column=1, pady=20)
         
         # Configure grid weights
         main_frame.columnconfigure(1, weight=1)
@@ -197,17 +192,25 @@ class MealPlanGenerator:
         """Open notes planning window with adaptive layout"""
         notes_window = tk.Toplevel(self.root)
         notes_window.title("Notizen-Modus - Essensplan Planung")
-        notes_window.geometry("1200x700")  # Made larger to accommodate more content
+        notes_window.geometry("1400x800")  # Made larger to accommodate weekend visibility
         
         main_frame = ttk.Frame(notes_window, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(main_frame, text="Essensplan Notizen", font=("Arial", 14, "bold")).pack(pady=(0, 10))
+        # Create a paned window to separate table from instructions
+        paned_window = ttk.PanedWindow(main_frame, orient=tk.VERTICAL)
+        paned_window.pack(fill=tk.BOTH, expand=True)
+        
+        # Top frame for the table
+        table_frame = ttk.Frame(paned_window)
+        paned_window.add(table_frame, weight=4)
+        
+        ttk.Label(table_frame, text="Essensplan Notizen", font=("Arial", 14, "bold")).pack(pady=(0, 10))
         
         # Create a simple table for notes
-        canvas = tk.Canvas(main_frame)
-        scrollbar_v = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-        scrollbar_h = ttk.Scrollbar(main_frame, orient="horizontal", command=canvas.xview)
+        canvas = tk.Canvas(table_frame)
+        scrollbar_v = ttk.Scrollbar(table_frame, orient="vertical", command=canvas.yview)
+        scrollbar_h = ttk.Scrollbar(table_frame, orient="horizontal", command=canvas.xview)
         scrollable_frame = ttk.Frame(canvas)
         
         scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
@@ -327,12 +330,20 @@ class MealPlanGenerator:
         scrollbar_v.pack(side="right", fill="y")
         scrollbar_h.pack(side="bottom", fill="x")
         
-        # Instructions and close button
-        info_frame = ttk.Frame(main_frame)
-        info_frame.pack(pady=5)
+        # Bottom frame for instructions and controls
+        control_frame = ttk.Frame(paned_window)
+        paned_window.add(control_frame, weight=1)
+        
+        # Instructions
+        info_frame = ttk.Frame(control_frame)
+        info_frame.pack(fill=tk.X, pady=10)
         ttk.Label(info_frame, text="Tipp: Verwende Strg + Pfeiltasten zur Navigation zwischen den Zellen", 
-                 font=("Arial", 9), foreground="gray").pack()
-        ttk.Button(main_frame, text="Schließen", command=notes_window.destroy).pack(pady=10)
+                 font=("Arial", 10), foreground="gray").pack()
+        
+        # Close button
+        button_frame = ttk.Frame(control_frame)
+        button_frame.pack(pady=10)
+        ttk.Button(button_frame, text="Schließen", command=notes_window.destroy).pack()
     
     def toggle_sources_options(self):
         """Enable/disable sources options based on checkbox state"""
@@ -821,9 +832,22 @@ a:hover {
                     
                     row_counter += 1
         
+        # Add file operation setting at the top of the settings section
+        settings_start_row = row_counter + 1
+        
+        # Settings header
+        ttk.Label(scrollable_frame, text="Einstellungen", font=("Arial", 12, "bold")).grid(row=settings_start_row, column=0, columnspan=5, pady=(20, 10))
+        
+        # File operation setting
+        ttk.Label(scrollable_frame, text="Datei-Operation:").grid(row=settings_start_row + 1, column=0, sticky=tk.W, pady=5)
+        file_op_frame = ttk.Frame(scrollable_frame)
+        file_op_frame.grid(row=settings_start_row + 1, column=1, columnspan=3, sticky=tk.W, padx=5)
+        ttk.Radiobutton(file_op_frame, text="Kopieren", variable=self.file_operation, value="copy").grid(row=0, column=0, sticky=tk.W)
+        ttk.Radiobutton(file_op_frame, text="Ausschneiden", variable=self.file_operation, value="cut").grid(row=0, column=1, sticky=tk.W, padx=(20, 0))
+        
         # Add sources section if enabled
         if self.show_sources_box.get():
-            sources_start_row = row_counter + 1
+            sources_start_row = settings_start_row + 3
             
             # Sources header
             ttk.Label(scrollable_frame, text="Download Links", font=("Arial", 12, "bold")).grid(row=sources_start_row, column=0, columnspan=5, pady=(20, 10))
@@ -1153,6 +1177,32 @@ a:hover {
         
         ttk.Button(second_row, text="ZIP im Projektordner erstellen", 
                   command=create_zip_in_folder).pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Copy week name button  
+        def copy_week_name():
+            try:
+                # Convert date format to week name format
+                start_date = datetime.strptime(self.week_start.get(), "%d.%m.%y")
+                end_date = datetime.strptime(self.week_end.get(), "%d.%m.%y")
+                
+                # Format dates as required: dd-mm-yy
+                start_formatted = start_date.strftime("%d-%m-%y")
+                end_formatted = end_date.strftime("%d-%m-%y")
+                
+                # Create week name in the format: woche-14-07-25bis20-07-25
+                week_name = f"woche-{start_formatted}bis{end_formatted}"
+                
+                # Copy to clipboard
+                self.root.clipboard_clear()
+                self.root.clipboard_append(week_name)
+                
+                messagebox.showinfo("Erfolg", f"Wochenname '{week_name}' in Zwischenablage kopiert!")
+                
+            except Exception as e:
+                messagebox.showerror("Fehler", f"Fehler beim Erstellen des Wochennamens: {str(e)}")
+        
+        ttk.Button(second_row, text="Wochenname kopieren", 
+                  command=copy_week_name).pack(side=tk.LEFT, padx=(0, 10))
         
         # OK button
         def close_dialog():
