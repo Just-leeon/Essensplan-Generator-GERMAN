@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 import zipfile
 from PIL import Image, ImageTk
 import io
+import json
+import uuid
 
 class MealPlanGenerator:
     def __init__(self, root):
@@ -41,11 +43,18 @@ class MealPlanGenerator:
         self.total_dishes = 0
         self.source_files = {"pdf1": tk.StringVar(), "pdf2": tk.StringVar()}
         
+        # Meal library variables
+        self.meals_library = {}
+        self.meals_data_path = ""
+        self.meal_file_operation = tk.StringVar(value="copy")  # "copy" or "cut" for meal library files
+        self.current_selected_meal_id = None  # Track if current meal is from database
+        
         # Initialize week dates
         self.set_current_week()
         
-        # Create pages
-        self.setup_page1()
+        # Initialize meal library and create pages
+        self.init_meal_library()
+        self.setup_meal_library_page()
     
     def set_current_week(self):
         """Set current week Monday to Sunday"""
@@ -77,11 +86,526 @@ class MealPlanGenerator:
         except ValueError:
             self.set_current_week()
     
+    def init_meal_library(self):
+        """Initialize meal library and create data directory"""
+        # Create meals data directory next to script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.meals_data_path = os.path.join(script_dir, "meals_data")
+        
+        if not os.path.exists(self.meals_data_path):
+            os.makedirs(self.meals_data_path)
+        
+        # Load existing meals
+        self.load_meals_library()
+    
+    def load_meals_library(self):
+        """Load meals from library"""
+        library_file = os.path.join(self.meals_data_path, "meals_library.json")
+        if os.path.exists(library_file):
+            try:
+                with open(library_file, 'r', encoding='utf-8') as f:
+                    self.meals_library = json.load(f)
+            except:
+                self.meals_library = {}
+        else:
+            self.meals_library = {}
+    
+    def save_meals_library(self):
+        """Save meals to library"""
+        library_file = os.path.join(self.meals_data_path, "meals_library.json")
+        try:
+            with open(library_file, 'w', encoding='utf-8') as f:
+                json.dump(self.meals_library, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            messagebox.showerror("Fehler", f"Fehler beim Speichern der Gerichte: {str(e)}")
+    
+    def setup_meal_library_page(self):
+        """New start page for meal library management"""
+        # Clear window
+        for widget in self.root.winfo_children():
+            widget.destroy()
+            
+        main_frame = ttk.Frame(self.root, padding="20")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Configure grid weights
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(2, weight=1)
+        
+        # Title
+        title_label = ttk.Label(main_frame, text="Gerichte Bibliothek", 
+                               font=("Arial", 16, "bold"))
+        title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
+        
+        # Meals data folder location
+        ttk.Label(main_frame, text="Speicherort der Gerichte-Datenbank:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        meals_data_var = tk.StringVar(value=self.meals_data_path)
+        meals_data_entry = ttk.Entry(main_frame, textvariable=meals_data_var, width=50)
+        meals_data_entry.grid(row=1, column=1, padx=5, sticky=(tk.W, tk.E))
+        ttk.Button(main_frame, text="Durchsuchen", 
+                  command=lambda: self.browse_meals_data_directory(meals_data_var)).grid(row=1, column=2, padx=5)
+        
+        # Create scrollable frame for meals with mouse wheel support
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        # Bind mouse wheel scrolling
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        def bind_to_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", on_mousewheel)
+        
+        def unbind_from_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+        
+        # Bind mouse wheel events
+        canvas.bind("<Enter>", bind_to_mousewheel)
+        canvas.bind("<Leave>", unbind_from_mousewheel)
+        scrollable_frame.bind("<Enter>", bind_to_mousewheel)
+        scrollable_frame.bind("<Leave>", unbind_from_mousewheel)
+        
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
+        scrollbar.grid(row=2, column=2, sticky=(tk.N, tk.S))
+        
+        # Refresh meals display
+        self.refresh_meals_display(scrollable_frame)
+        
+        # Add meal button
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=3, column=0, columnspan=3, pady=20)
+        
+        ttk.Button(button_frame, text="+ Neues Gericht hinzufügen", 
+                  command=self.add_new_meal).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(button_frame, text="Weiter zum Essensplan", 
+                  command=self.setup_page1).pack(side=tk.RIGHT, padx=5)
+    
+    def browse_meals_data_directory(self, path_var):
+        """Browse for meals data directory"""
+        directory = filedialog.askdirectory(title="Gerichte-Datenbank Ordner auswählen", 
+                                          initialdir=self.meals_data_path)
+        if directory:
+            self.meals_data_path = directory
+            path_var.set(directory)
+            self.load_meals_library()  # Reload meals from new location
+            self.setup_meal_library_page()  # Refresh display
+    
+    def refresh_meals_display(self, parent_frame):
+        """Refresh the display of meals in the library"""
+        # Clear existing widgets
+        for widget in parent_frame.winfo_children():
+            widget.destroy()
+        
+        if not self.meals_library:
+            ttk.Label(parent_frame, text="Noch keine Gerichte vorhanden. Füge dein erstes Gericht hinzu!", 
+                     font=("Arial", 12), foreground="gray").pack(pady=50)
+            return
+        
+        # Create grid of meal cards
+        row = 0
+        col = 0
+        max_cols = 3
+        
+        for meal_id, meal_data in self.meals_library.items():
+            # Create meal card
+            card_frame = ttk.LabelFrame(parent_frame, text=meal_data['name'], padding="10")
+            card_frame.grid(row=row, column=col, padx=10, pady=10, sticky=(tk.W, tk.E))
+            
+            # Image display
+            if meal_data.get('image_path') and os.path.exists(meal_data['image_path']):
+                try:
+                    # Load and resize image
+                    img = Image.open(meal_data['image_path'])
+                    img.thumbnail((150, 150), Image.Resampling.LANCZOS)
+                    photo = ImageTk.PhotoImage(img)
+                    
+                    img_label = ttk.Label(card_frame, image=photo)
+                    img_label.image = photo  # Keep a reference
+                    img_label.pack(pady=5)
+                except:
+                    ttk.Label(card_frame, text="Bild nicht verfügbar", 
+                             foreground="gray").pack(pady=5)
+            else:
+                ttk.Label(card_frame, text="Kein Bild", foreground="gray").pack(pady=5)
+            
+            # Additional info
+            if meal_data.get('additional_info'):
+                info_text = meal_data['additional_info'][:50] + ("..." if len(meal_data['additional_info']) > 50 else "")
+                ttk.Label(card_frame, text=info_text, font=("Arial", 9), 
+                         foreground="gray").pack(pady=2)
+            
+            # Buttons
+            btn_frame = ttk.Frame(card_frame)
+            btn_frame.pack(pady=5)
+            
+            ttk.Button(btn_frame, text="Bearbeiten", 
+                      command=lambda m_id=meal_id: self.edit_meal(m_id)).pack(side=tk.LEFT, padx=2)
+            ttk.Button(btn_frame, text="Löschen", 
+                      command=lambda m_id=meal_id: self.delete_meal(m_id)).pack(side=tk.LEFT, padx=2)
+            
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
+        
+        # Configure column weights
+        for i in range(max_cols):
+            parent_frame.columnconfigure(i, weight=1)
+    
+    def add_new_meal(self):
+        """Open dialog to add new meal"""
+        self.meal_dialog(None)
+    
+    def edit_meal(self, meal_id):
+        """Open dialog to edit existing meal"""
+        self.meal_dialog(meal_id)
+    
+    def meal_dialog(self, meal_id=None):
+        """Dialog for adding/editing meals"""
+        is_edit = meal_id is not None
+        meal_data = self.meals_library.get(meal_id, {}) if is_edit else {}
+        
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Gericht bearbeiten" if is_edit else "Neues Gericht hinzufügen")
+        dialog.geometry("500x600")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Name
+        ttk.Label(main_frame, text="Name des Gerichts:").pack(anchor=tk.W, pady=(0, 5))
+        name_var = tk.StringVar(value=meal_data.get('name', ''))
+        name_entry = ttk.Entry(main_frame, textvariable=name_var, width=50)
+        name_entry.pack(fill=tk.X, pady=(0, 15))
+        
+        # Image
+        ttk.Label(main_frame, text="Bild des Gerichts:").pack(anchor=tk.W, pady=(0, 5))
+        image_path_var = tk.StringVar(value=meal_data.get('image_path', ''))
+        
+        image_frame = ttk.Frame(main_frame)
+        image_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        image_entry = ttk.Entry(image_frame, textvariable=image_path_var, width=40)
+        image_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        ttk.Button(image_frame, text="Durchsuchen", 
+                  command=lambda: self.browse_image(image_path_var)).pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(image_frame, text="📋", 
+                  command=lambda: self.paste_image_from_clipboard_for_meal(image_path_var)).pack(side=tk.RIGHT, padx=(5, 0))
+        
+        # PDF Recipe
+        ttk.Label(main_frame, text="PDF Rezept:").pack(anchor=tk.W, pady=(0, 5))
+        pdf_path_var = tk.StringVar(value=meal_data.get('pdf_path', ''))
+        
+        pdf_frame = ttk.Frame(main_frame)
+        pdf_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        pdf_entry = ttk.Entry(pdf_frame, textvariable=pdf_path_var, width=40)
+        pdf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        ttk.Button(pdf_frame, text="Durchsuchen", 
+                  command=lambda: self.browse_pdf_for_meal(pdf_path_var)).pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(pdf_frame, text="📋", 
+                  command=lambda: self.paste_pdf_from_clipboard_for_meal(pdf_path_var)).pack(side=tk.RIGHT, padx=(5, 0))
+        
+        # File operation setting
+        ttk.Label(main_frame, text="Datei-Operation:").pack(anchor=tk.W, pady=(0, 5))
+        file_op_frame = ttk.Frame(main_frame)
+        file_op_frame.pack(anchor=tk.W, pady=(0, 15))
+        ttk.Radiobutton(file_op_frame, text="Kopieren", variable=self.meal_file_operation, value="copy").pack(side=tk.LEFT)
+        ttk.Radiobutton(file_op_frame, text="Ausschneiden", variable=self.meal_file_operation, value="cut").pack(side=tk.LEFT, padx=(20, 0))
+        
+        # Additional info
+        ttk.Label(main_frame, text="Zusätzliche Informationen:").pack(anchor=tk.W, pady=(0, 5))
+        info_text = tk.Text(main_frame, height=8, width=50)
+        info_text.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        
+        if meal_data.get('additional_info'):
+            info_text.insert('1.0', meal_data['additional_info'])
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=10)
+        
+        def save_meal():
+            name = name_var.get().strip()
+            if not name:
+                messagebox.showerror("Fehler", "Bitte geben Sie einen Namen für das Gericht ein.")
+                return
+            
+            # Create meal data
+            new_meal_data = {
+                'name': name,
+                'image_path': '',
+                'pdf_path': '',
+                'additional_info': info_text.get('1.0', 'end-1c').strip()
+            }
+            
+            # Generate meal ID if new
+            if not is_edit:
+                meal_id = str(uuid.uuid4())
+            
+            # Create meal directory
+            meal_dir = os.path.join(self.meals_data_path, f"meal_{meal_id}")
+            if not os.path.exists(meal_dir):
+                os.makedirs(meal_dir)
+            
+            # Copy or cut files if provided
+            if image_path_var.get() and os.path.exists(image_path_var.get()):
+                try:
+                    image_ext = os.path.splitext(image_path_var.get())[1]
+                    new_image_path = os.path.join(meal_dir, f"image{image_ext}")
+                    if self.meal_file_operation.get() == "copy":
+                        shutil.copy2(image_path_var.get(), new_image_path)
+                    else:  # cut
+                        shutil.move(image_path_var.get(), new_image_path)
+                    new_meal_data['image_path'] = new_image_path
+                except Exception as e:
+                    messagebox.showwarning("Warnung", f"Bild konnte nicht {'kopiert' if self.meal_file_operation.get() == 'copy' else 'verschoben'} werden: {str(e)}")
+            elif is_edit:
+                new_meal_data['image_path'] = meal_data.get('image_path', '')
+            
+            if pdf_path_var.get() and os.path.exists(pdf_path_var.get()):
+                try:
+                    pdf_ext = os.path.splitext(pdf_path_var.get())[1]
+                    new_pdf_path = os.path.join(meal_dir, f"recipe{pdf_ext}")
+                    if self.meal_file_operation.get() == "copy":
+                        shutil.copy2(pdf_path_var.get(), new_pdf_path)
+                    else:  # cut
+                        shutil.move(pdf_path_var.get(), new_pdf_path)
+                    new_meal_data['pdf_path'] = new_pdf_path
+                except Exception as e:
+                    messagebox.showwarning("Warnung", f"PDF konnte nicht {'kopiert' if self.meal_file_operation.get() == 'copy' else 'verschoben'} werden: {str(e)}")
+            elif is_edit:
+                new_meal_data['pdf_path'] = meal_data.get('pdf_path', '')
+            
+            # Save to library
+            self.meals_library[meal_id] = new_meal_data
+            self.save_meals_library()
+            
+            # Clean up temporary files after successful save
+            self.cleanup_temp_meal_files()
+            
+            dialog.destroy()
+            self.setup_meal_library_page()  # Refresh display
+        
+        def cancel_meal():
+            """Cancel and clean up temporary files"""
+            self.cleanup_temp_meal_files()
+            dialog.destroy()
+        
+        ttk.Button(button_frame, text="Speichern", command=save_meal).pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(button_frame, text="Abbrechen", command=cancel_meal).pack(side=tk.RIGHT)
+        
+        # Focus on name entry
+        name_entry.focus_set()
+    
+    def cleanup_temp_meal_files(self):
+        """Clean up temporary files in meals_data/temp directory"""
+        temp_dir = os.path.join(self.meals_data_path, "temp")
+        if os.path.exists(temp_dir):
+            try:
+                for filename in os.listdir(temp_dir):
+                    if filename.startswith("temp_"):
+                        file_path = os.path.join(temp_dir, filename)
+                        try:
+                            os.remove(file_path)
+                        except:
+                            pass  # Ignore if file can't be deleted
+            except:
+                pass  # Ignore any directory access errors
+    
+    def update_file_operation_state(self):
+        """Update file operation radio buttons based on whether database meals are selected"""
+        has_database_meals = False
+        
+        # Check if any dish uses a meal from database
+        for dish_num in self.file_entries:
+            pdf_path = self.file_entries[dish_num]["pdf"].get()
+            photo_path = self.file_entries[dish_num]["photo"].get()
+            
+            # Check if paths are from meals_data folder (indicating database meal)
+            if ((pdf_path and self.meals_data_path in pdf_path) or 
+                (photo_path and self.meals_data_path in photo_path)):
+                has_database_meals = True
+                break
+        
+        if has_database_meals:
+            # Disable cut option and show warning
+            self.cut_radio.config(state='disabled')
+            if self.file_operation.get() == "cut":
+                self.file_operation.set("copy")  # Force to copy
+            self.file_op_warning.config(text="⚠️ Ausschneiden deaktiviert - Gerichte aus der Datenbank würden beschädigt werden!")
+        else:
+            # Enable cut option and clear warning
+            self.cut_radio.config(state='normal')
+            self.file_op_warning.config(text="")
+    
+    def browse_image(self, path_var):
+        """Browse for image file"""
+        filetypes = [
+            ("Bild Dateien", "*.jpg *.jpeg *.png *.gif *.bmp"),
+            ("Alle Dateien", "*.*")
+        ]
+        filename = filedialog.askopenfilename(title="Bild auswählen", filetypes=filetypes)
+        if filename:
+            path_var.set(filename)
+    
+    def browse_pdf_for_meal(self, path_var):
+        """Browse for PDF file for meal library"""
+        filetypes = [
+            ("PDF Dateien", "*.pdf"),
+            ("Alle Dateien", "*.*")
+        ]
+        filename = filedialog.askopenfilename(title="PDF auswählen", filetypes=filetypes)
+        if filename:
+            path_var.set(filename)
+    
+    def paste_pdf_from_clipboard_for_meal(self, path_var):
+        """Paste PDF from clipboard for meal library - creates temporary file"""
+        try:
+            # First, try to get file path from clipboard
+            clipboard_content = self.root.clipboard_get()
+            if clipboard_content and os.path.exists(clipboard_content) and clipboard_content.lower().endswith('.pdf'):
+                # Create temporary copy in meals_data folder
+                temp_dir = os.path.join(self.meals_data_path, "temp")
+                os.makedirs(temp_dir, exist_ok=True)
+                temp_filename = f"temp_pdf_{uuid.uuid4().hex[:8]}.pdf"
+                temp_path = os.path.join(temp_dir, temp_filename)
+                shutil.copy2(clipboard_content, temp_path)
+                path_var.set(temp_path)
+                messagebox.showinfo("Erfolg", "PDF aus Zwischenablage eingefügt!")
+                return
+            
+            # If no valid file path, check if there's actual file data in clipboard (not implemented for PDFs)
+            messagebox.showwarning("Warnung", "Kein gültiger PDF-Pfad in der Zwischenablage gefunden!\nBitte kopieren Sie den Dateipfad einer PDF-Datei.")
+            
+        except Exception as e:
+            messagebox.showerror("Fehler", f"Fehler beim Einfügen aus Zwischenablage: {str(e)}")
+    
+    def paste_image_from_clipboard_for_meal(self, path_var):
+        """Paste image from clipboard for meal library - creates temporary file"""
+        try:
+            # First, try to get actual image data from clipboard
+            from PIL import ImageGrab
+            img = ImageGrab.grabclipboard()
+            if img:
+                # Create temporary directory in meals_data
+                temp_dir = os.path.join(self.meals_data_path, "temp")
+                os.makedirs(temp_dir, exist_ok=True)
+                
+                # Determine format and save
+                if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+                    temp_filename = f"temp_image_{uuid.uuid4().hex[:8]}.png"
+                    temp_path = os.path.join(temp_dir, temp_filename)
+                    img.save(temp_path, "PNG")
+                else:
+                    temp_filename = f"temp_image_{uuid.uuid4().hex[:8]}.jpg"
+                    temp_path = os.path.join(temp_dir, temp_filename)
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    img.save(temp_path, "JPEG", quality=90)
+                
+                path_var.set(temp_path)
+                messagebox.showinfo("Erfolg", "Bild aus Zwischenablage eingefügt!")
+                return
+            
+            # If no image data, try file path from clipboard
+            clipboard_content = self.root.clipboard_get()
+            valid_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
+            if clipboard_content and os.path.exists(clipboard_content) and clipboard_content.lower().endswith(valid_extensions):
+                # Create temporary copy in meals_data folder
+                temp_dir = os.path.join(self.meals_data_path, "temp")
+                os.makedirs(temp_dir, exist_ok=True)
+                file_ext = os.path.splitext(clipboard_content)[1]
+                temp_filename = f"temp_image_{uuid.uuid4().hex[:8]}{file_ext}"
+                temp_path = os.path.join(temp_dir, temp_filename)
+                shutil.copy2(clipboard_content, temp_path)
+                path_var.set(temp_path)
+                messagebox.showinfo("Erfolg", "Bild aus Zwischenablage eingefügt!")
+                return
+            
+            messagebox.showwarning("Warnung", "Keine Bilddaten oder gültiger Bild-Pfad in der Zwischenablage gefunden!")
+            
+        except Exception as e:
+            messagebox.showerror("Fehler", f"Fehler beim Einfügen aus Zwischenablage: {str(e)}")
+    
+    def browse_pdf(self, dish_num, path_var):
+        """Browse for PDF file with dish number"""
+        filetypes = [
+            ("PDF Dateien", "*.pdf"),
+            ("Alle Dateien", "*.*")
+        ]
+        filename = filedialog.askopenfilename(title=f"PDF für Gericht {dish_num} auswählen", filetypes=filetypes)
+        if filename:
+            path_var.set(filename)
+    
+    def delete_meal(self, meal_id):
+        """Delete a meal from the library"""
+        meal_name = self.meals_library[meal_id]['name']
+        if messagebox.askyesno("Löschen bestätigen", 
+                              f"Möchten Sie das Gericht '{meal_name}' wirklich löschen?"):
+            # Delete meal directory
+            meal_dir = os.path.join(self.meals_data_path, f"meal_{meal_id}")
+            if os.path.exists(meal_dir):
+                try:
+                    shutil.rmtree(meal_dir)
+                except:
+                    pass
+            
+            # Remove from library
+            del self.meals_library[meal_id]
+            self.save_meals_library()
+            self.setup_meal_library_page()  # Refresh display
+    
     def setup_page1(self):
         """Configuration page"""
         # Clear window
         for widget in self.root.winfo_children():
             widget.destroy()
+        
+        # Auto-create default folder if website_path is not set or empty
+        if not self.website_path.get():
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            date_range = f"{self.week_start.get()}-{self.week_end.get()}"
+            default_folder = os.path.join(script_dir, f"Essensplan {date_range}")
+            
+            if not os.path.exists(default_folder):
+                try:
+                    os.makedirs(default_folder)
+                except Exception as e:
+                    print(f"Could not create default folder: {e}")
+                    default_folder = script_dir
+            
+            self.website_path.set(default_folder)
+            
+        # Initialize form change tracking
+        self.form_changed = False
+        self.original_values = {
+            'website_path': self.website_path.get(),
+            'week_start': self.week_start.get(),
+            'week_end': self.week_end.get(),
+            'breakfast_rows': self.breakfast_rows.get(),
+            'lunch_rows': self.lunch_rows.get(),
+            'snacks_rows': self.snacks_rows.get(),
+            'dessert_rows': self.dessert_rows.get(),
+            'empty_cell_display': self.empty_cell_display.get(),
+            'show_photos': self.show_photos.get(),
+            'show_sources_box': self.show_sources_box.get(),
+            'source_pdf1_name': self.source_pdf1_name.get(),
+            'source_pdf2_name': self.source_pdf2_name.get(),
+            'rename_subfolder': self.rename_subfolder.get()
+        }
             
         main_frame = ttk.Frame(self.root, padding="20")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -93,7 +617,9 @@ class MealPlanGenerator:
         
         # Website path selection
         ttk.Label(main_frame, text="Speicherort der Webseite:").grid(row=1, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main_frame, textvariable=self.website_path, width=50).grid(row=1, column=1, columnspan=2, padx=5, sticky=(tk.W, tk.E))
+        website_entry = ttk.Entry(main_frame, textvariable=self.website_path, width=50)
+        website_entry.grid(row=1, column=1, columnspan=2, padx=5, sticky=(tk.W, tk.E))
+        website_entry.bind('<KeyPress>', self.on_form_change)
         ttk.Button(main_frame, text="Durchsuchen", 
                   command=self.browse_directory).grid(row=1, column=3, padx=5)
         
@@ -121,16 +647,24 @@ class MealPlanGenerator:
                  font=("Arial", 12, "bold")).grid(row=4, column=0, columnspan=4, pady=(20, 10))
         
         ttk.Label(main_frame, text="Frühstück:").grid(row=5, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main_frame, textvariable=self.breakfast_rows, width=10).grid(row=5, column=1, sticky=tk.W, padx=5)
+        breakfast_entry = ttk.Entry(main_frame, textvariable=self.breakfast_rows, width=10)
+        breakfast_entry.grid(row=5, column=1, sticky=tk.W, padx=5)
+        breakfast_entry.bind('<KeyPress>', self.on_form_change)
         
         ttk.Label(main_frame, text="Mittag-/Abendessen:").grid(row=6, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main_frame, textvariable=self.lunch_rows, width=10).grid(row=6, column=1, sticky=tk.W, padx=5)
+        lunch_entry = ttk.Entry(main_frame, textvariable=self.lunch_rows, width=10)
+        lunch_entry.grid(row=6, column=1, sticky=tk.W, padx=5)
+        lunch_entry.bind('<KeyPress>', self.on_form_change)
         
         ttk.Label(main_frame, text="Snacks:").grid(row=7, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main_frame, textvariable=self.snacks_rows, width=10).grid(row=7, column=1, sticky=tk.W, padx=5)
+        snacks_entry = ttk.Entry(main_frame, textvariable=self.snacks_rows, width=10)
+        snacks_entry.grid(row=7, column=1, sticky=tk.W, padx=5)
+        snacks_entry.bind('<KeyPress>', self.on_form_change)
         
         ttk.Label(main_frame, text="Nachtisch:").grid(row=8, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main_frame, textvariable=self.dessert_rows, width=10).grid(row=8, column=1, sticky=tk.W, padx=5)
+        dessert_entry = ttk.Entry(main_frame, textvariable=self.dessert_rows, width=10)
+        dessert_entry.grid(row=8, column=1, sticky=tk.W, padx=5)
+        dessert_entry.bind('<KeyPress>', self.on_form_change)
         
         # Info label
         info_label = ttk.Label(main_frame, text="Hinweis: Eingabe '/' bedeutet, dass die Kategorie nicht angezeigt wird",
@@ -149,16 +683,19 @@ class MealPlanGenerator:
         ttk.Radiobutton(empty_frame, text="Gar nichts anzeigen", variable=self.empty_cell_display, value="nothing").grid(row=0, column=1, sticky=tk.W, padx=(20, 0))
         
         # Show photos
-        ttk.Checkbutton(main_frame, text="Fotos anzeigen", variable=self.show_photos).grid(row=12, column=0, columnspan=2, sticky=tk.W, pady=5)
+        photos_checkbox = ttk.Checkbutton(main_frame, text="Fotos anzeigen", variable=self.show_photos, command=self.on_form_change)
+        photos_checkbox.grid(row=12, column=0, columnspan=2, sticky=tk.W, pady=5)
         
         # Removed file operation setting from page 1 - moved to page 2
         
         # Rename subfolder option
-        ttk.Checkbutton(main_frame, text="Unterordner zu 'Essensplan [Zeitspanne]' umbenennen", 
-                       variable=self.rename_subfolder).grid(row=13, column=0, columnspan=4, sticky=tk.W, pady=5)
+        rename_checkbox = ttk.Checkbutton(main_frame, text="Unterordner zu 'Essensplan [Zeitspanne]' umbenennen", 
+                       variable=self.rename_subfolder, command=self.on_form_change)
+        rename_checkbox.grid(row=13, column=0, columnspan=4, sticky=tk.W, pady=5)
         
         # Show sources box
-        sources_checkbox = ttk.Checkbutton(main_frame, text="Download Links anzeigen", variable=self.show_sources_box, command=self.toggle_sources_options)
+        sources_checkbox = ttk.Checkbutton(main_frame, text="Download Links anzeigen", variable=self.show_sources_box, 
+                                         command=lambda: [self.toggle_sources_options(), self.on_form_change()])
         sources_checkbox.grid(row=14, column=0, columnspan=2, sticky=tk.W, pady=5)
         
         # Source PDF names
@@ -168,10 +705,12 @@ class MealPlanGenerator:
         ttk.Label(self.sources_frame, text="PDF 1:").grid(row=0, column=0, sticky=tk.W, pady=2)
         self.pdf1_entry = ttk.Entry(self.sources_frame, textvariable=self.source_pdf1_name, width=40)
         self.pdf1_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=2)
+        self.pdf1_entry.bind('<KeyPress>', self.on_form_change)
         
         ttk.Label(self.sources_frame, text="PDF 2:").grid(row=1, column=0, sticky=tk.W, pady=2)
         self.pdf2_entry = ttk.Entry(self.sources_frame, textvariable=self.source_pdf2_name, width=40)
         self.pdf2_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5, pady=2)
+        self.pdf2_entry.bind('<KeyPress>', self.on_form_change)
         
         self.sources_frame.columnconfigure(1, weight=1)
         
@@ -179,8 +718,13 @@ class MealPlanGenerator:
         ttk.Button(main_frame, text="Notizen-Modus öffnen", 
                   command=self.open_notes_mode).grid(row=16, column=0, columnspan=2, pady=10, sticky=tk.W)
         
-        # Continue button
-        ttk.Button(main_frame, text="Weiter", command=self.validate_and_continue).grid(row=17, column=1, pady=20)
+        # Back and Continue buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=17, column=0, columnspan=4, pady=20)
+        
+        ttk.Button(button_frame, text="← Zurück", 
+                  command=self.go_back_to_library_with_warning).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(button_frame, text="Weiter", command=self.validate_and_continue).pack(side=tk.RIGHT)
         
         # Configure grid weights
         main_frame.columnconfigure(1, weight=1)
@@ -764,10 +1308,25 @@ a:hover {
                     # Dish number
                     ttk.Label(scrollable_frame, text=f"Gericht {dish_counter}").grid(row=row_counter, column=0, padx=5, pady=2)
                     
-                    # Dish name
+                    # Dish name with meal search
                     name_var = tk.StringVar(value=self.dish_names[dish_counter])
-                    name_entry = ttk.Entry(scrollable_frame, textvariable=name_var, width=20)
-                    name_entry.grid(row=row_counter, column=1, padx=5, pady=2)
+                    
+                    # Create frame for name entry and search button
+                    name_frame = ttk.Frame(scrollable_frame)
+                    name_frame.grid(row=row_counter, column=1, padx=5, pady=2, sticky=(tk.W, tk.E))
+                    
+                    name_entry = ttk.Entry(name_frame, textvariable=name_var, width=15)
+                    name_entry.grid(row=0, column=0, sticky=(tk.W, tk.E))
+                    name_frame.columnconfigure(0, weight=1)
+                    
+                    # Search button for pre-set meals
+                    search_button = ttk.Button(name_frame, text="🔍", width=3,
+                                             command=lambda i=dish_counter, var=name_var: self.search_meal(i, var))
+                    search_button.grid(row=0, column=1, padx=(2, 0))
+                    
+                    # Bind double-click to search as well
+                    name_entry.bind("<Double-Button-1>", lambda e, i=dish_counter, var=name_var: self.search_meal(i, var))
+                    
                     self.name_entries[dish_counter] = name_var
                     
                     # Empty checkbox
@@ -818,6 +1377,7 @@ a:hover {
                     # Store widget references for graying out
                     self.input_widgets[dish_counter] = {
                         "name_entry": name_entry,
+                        "search_button": search_button,
                         "pdf_entry": pdf_entry,
                         "pdf_button": pdf_button,
                         "pdf_clipboard_button": pdf_clipboard_button,
@@ -842,8 +1402,14 @@ a:hover {
         ttk.Label(scrollable_frame, text="Datei-Operation:").grid(row=settings_start_row + 1, column=0, sticky=tk.W, pady=5)
         file_op_frame = ttk.Frame(scrollable_frame)
         file_op_frame.grid(row=settings_start_row + 1, column=1, columnspan=3, sticky=tk.W, padx=5)
-        ttk.Radiobutton(file_op_frame, text="Kopieren", variable=self.file_operation, value="copy").grid(row=0, column=0, sticky=tk.W)
-        ttk.Radiobutton(file_op_frame, text="Ausschneiden", variable=self.file_operation, value="cut").grid(row=0, column=1, sticky=tk.W, padx=(20, 0))
+        self.copy_radio = ttk.Radiobutton(file_op_frame, text="Kopieren", variable=self.file_operation, value="copy")
+        self.copy_radio.grid(row=0, column=0, sticky=tk.W)
+        self.cut_radio = ttk.Radiobutton(file_op_frame, text="Ausschneiden", variable=self.file_operation, value="cut")
+        self.cut_radio.grid(row=0, column=1, sticky=tk.W, padx=(20, 0))
+        
+        # Warning label for database meals
+        self.file_op_warning = ttk.Label(scrollable_frame, text="", foreground="red", font=("Arial", 9))
+        self.file_op_warning.grid(row=settings_start_row + 2, column=0, columnspan=4, sticky=tk.W, pady=2)
         
         # Add sources section if enabled
         if self.show_sources_box.get():
@@ -881,11 +1447,14 @@ a:hover {
         scrollbar.grid(row=3, column=5, sticky=(tk.N, tk.S), pady=(0, 10))
         main_frame.rowconfigure(3, weight=1)
         
+        # Initial update of file operation state
+        self.update_file_operation_state()
+        
         # Buttons
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=4, column=0, columnspan=6, pady=10)
         
-        ttk.Button(button_frame, text="Zurück", command=self.setup_page1).grid(row=0, column=0, padx=5)
+        ttk.Button(button_frame, text="← Zurück", command=self.go_back_to_page1_with_warning).grid(row=0, column=0, padx=5)
         ttk.Button(button_frame, text="Dateien kopieren und fertigstellen", 
                   command=self.copy_files_and_finish).grid(row=0, column=1, padx=5)
     
@@ -948,8 +1517,104 @@ a:hover {
         for widget_name, widget in widgets.items():
             if widget_name in ['name_entry', 'pdf_entry', 'photo_entry']:
                 widget.config(state=state)
-            elif widget_name in ['pdf_button', 'photo_button', 'clipboard_button', 'pdf_clipboard_button']:
+            elif widget_name in ['pdf_button', 'photo_button', 'clipboard_button', 'pdf_clipboard_button', 'search_button']:
                 widget.config(state=state)
+    
+    def search_meal(self, dish_num, name_var):
+        """Open search dialog for pre-set meals"""
+        if not self.meals_library:
+            messagebox.showinfo("Info", "Noch keine Gerichte in der Bibliothek vorhanden.")
+            return
+        
+        # Create search dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Gericht auswählen")
+        dialog.geometry("600x500")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Search entry
+        ttk.Label(main_frame, text="Suche nach Gericht:").pack(anchor=tk.W, pady=(0, 5))
+        search_var = tk.StringVar()
+        search_entry = ttk.Entry(main_frame, textvariable=search_var, width=50)
+        search_entry.pack(fill=tk.X, pady=(0, 15))
+        
+        # Results listbox
+        ttk.Label(main_frame, text="Verfügbare Gerichte:").pack(anchor=tk.W, pady=(0, 5))
+        
+        # Create frame for listbox and scrollbar
+        list_frame = ttk.Frame(main_frame)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        
+        listbox = tk.Listbox(list_frame, height=15)
+        scrollbar_list = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
+        listbox.configure(yscrollcommand=scrollbar_list.set)
+        
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar_list.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Store meal data for quick access
+        meal_items = []
+        
+        def update_results():
+            """Update search results based on search term"""
+            search_term = search_var.get().lower()
+            listbox.delete(0, tk.END)
+            meal_items.clear()
+            
+            for meal_id, meal_data in self.meals_library.items():
+                meal_name = meal_data['name']
+                if search_term in meal_name.lower() or search_term == "":
+                    listbox.insert(tk.END, meal_name)
+                    meal_items.append((meal_id, meal_data))
+        
+        # Bind search as you type
+        search_var.trace('w', lambda *args: update_results())
+        
+        # Initial population
+        update_results()
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=10)
+        
+        def select_meal():
+            """Select the highlighted meal and apply it to the dish"""
+            selection = listbox.curselection()
+            if not selection:
+                messagebox.showwarning("Warnung", "Bitte wählen Sie ein Gericht aus.")
+                return
+            
+            meal_id, meal_data = meal_items[selection[0]]
+            
+            # Set dish name
+            name_var.set(meal_data['name'])
+            
+            # Auto-set PDF and photo if available
+            if meal_data.get('pdf_path') and os.path.exists(meal_data['pdf_path']):
+                if dish_num in self.file_entries:
+                    self.file_entries[dish_num]['pdf'].set(meal_data['pdf_path'])
+            
+            if meal_data.get('image_path') and os.path.exists(meal_data['image_path']):
+                if dish_num in self.file_entries:
+                    self.file_entries[dish_num]['photo'].set(meal_data['image_path'])
+            
+            # Update file operation state after selecting database meal
+            self.update_file_operation_state()
+            
+            dialog.destroy()
+        
+        # Double-click to select
+        listbox.bind("<Double-Button-1>", lambda e: select_meal())
+        
+        ttk.Button(button_frame, text="Auswählen", command=select_meal).pack(side=tk.RIGHT, padx=(5, 0))
+        ttk.Button(button_frame, text="Abbrechen", command=dialog.destroy).pack(side=tk.RIGHT)
+        
+        # Focus on search entry
+        search_entry.focus_set()
     
     def toggle_empty_cell(self, dish_num):
         """Toggle empty cell state and update widget appearance"""
@@ -1378,6 +2043,67 @@ a:hover {
                 
         except Exception as e:
             raise Exception(f"Screenshot konnte nicht erstellt werden: {str(e)}")
+    
+    def on_form_change(self, event=None):
+        """Track when form fields change"""
+        self.form_changed = True
+    
+    def has_form_changes(self):
+        """Check if any form values have changed"""
+        if not hasattr(self, 'original_values'):
+            return False
+        
+        current_values = {
+            'website_path': self.website_path.get(),
+            'week_start': self.week_start.get(),
+            'week_end': self.week_end.get(),
+            'breakfast_rows': self.breakfast_rows.get(),
+            'lunch_rows': self.lunch_rows.get(),
+            'snacks_rows': self.snacks_rows.get(),
+            'dessert_rows': self.dessert_rows.get(),
+            'empty_cell_display': self.empty_cell_display.get(),
+            'show_photos': self.show_photos.get(),
+            'show_sources_box': self.show_sources_box.get(),
+            'source_pdf1_name': self.source_pdf1_name.get(),
+            'source_pdf2_name': self.source_pdf2_name.get(),
+            'rename_subfolder': self.rename_subfolder.get()
+        }
+        
+        return current_values != self.original_values
+    
+    def go_back_to_library_with_warning(self):
+        """Go back to meal library page with unsaved changes warning"""
+        if self.has_form_changes():
+            if messagebox.askyesno("Ungespeicherte Änderungen", 
+                                 "Sie haben ungespeicherte Änderungen. Sind Sie sicher, dass Sie zurück gehen möchten? Alle Änderungen gehen verloren."):
+                self.setup_meal_library_page()
+        else:
+            self.setup_meal_library_page()
+    
+    def go_back_to_page1_with_warning(self):
+        """Go back to page1 with unsaved changes warning for page2"""
+        if hasattr(self, 'file_entries') and self.file_entries:
+            # Check if any file assignments have been made
+            has_assignments = False
+            for dish_num in self.file_entries:
+                name_changed = False
+                if hasattr(self, 'name_entries') and dish_num in self.name_entries:
+                    name_changed = self.name_entries[dish_num].get() != f"Gericht {dish_num}"
+                
+                if (self.file_entries[dish_num]["photo"].get() or 
+                    self.file_entries[dish_num]["pdf"].get() or
+                    name_changed):
+                    has_assignments = True
+                    break
+            
+            if has_assignments:
+                if messagebox.askyesno("Ungespeicherte Änderungen", 
+                                     "Sie haben ungespeicherte Datei-Zuordnungen. Sind Sie sicher, dass Sie zurück gehen möchten? Alle Änderungen gehen verloren."):
+                    self.setup_page1()
+            else:
+                self.setup_page1()
+        else:
+            self.setup_page1()
 
 def main():
     root = tk.Tk()
