@@ -116,4 +116,5 @@ _____└── info.txt<br>
 
 ## Zukünftige Verbesserungen
 Lass mich wissen, wenn du Funktionen vermisst oder Ideen für Verbesserungen hast!<br>
-Feedback und Vorschläge sind sehr willkommen.
+Feedback und Vorschläge sind sehr willkommen.<br>
+**English version** is planned! *(but not with high priority, unless requested)*
