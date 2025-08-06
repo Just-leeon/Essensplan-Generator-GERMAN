@@ -63,25 +63,27 @@ Die folgenden Python-Standard-Bibliotheken werden verwendet und müssen nicht se
 - Klicke auf das "+" um neue Gerichte hinzuzufügen
 - Lade Fotos und PDF-Rezepte hoch oder füge sie aus der Zwischenablage ein
 - Konfiguriere den Speicherort der `meals_data` Datenbank
-*(Hier wäre ein Screenshot der Gerichte-Bibliothek hilfreich)*
+<img width="902" height="832" alt="image" src="https://github.com/user-attachments/assets/430d5d2f-058c-4963-8205-edf2f74d8988" />
+<img width="502" height="632" alt="image" src="https://github.com/user-attachments/assets/081b0ca6-979b-4a59-89ba-f50ea1820308" />
 
-3. **Einstellungen:** Konfiguriere deinen Wochenplan
+<br> 3. **Einstellungen:** Konfiguriere deinen Wochenplan
 - Wähle Start- und Enddatum der Woche
 - Bestimme die Anzahl der Gerichte pro Mahlzeit
 - Konfiguriere Anzeige-Optionen und Datei-Operationen
-*(Hier wäre ein Screenshot der Konfigurationsseite hilfreich)*
+<img width="902" height="832" alt="image" src="https://github.com/user-attachments/assets/ed6ca3a0-3fc6-4601-83ea-8bc647552040" />
+<img width="1402" height="832" alt="image" src="https://github.com/user-attachments/assets/db6180f3-ac72-443b-b868-17fae3d2de0e" />
 
-4. **Zuordnung:** Weise jedem Tag und jeder Mahlzeit Gerichte zu
+<br> 4. **Zuordnung:** Weise jedem Tag und jeder Mahlzeit Gerichte zu
 - Nutze die Suchfunktion für Gerichte aus der Bibliothek
 - Oder lade neue Fotos/PDFs direkt hoch
 - Benenne Gerichte individuell
-*(Hier wäre ein Screenshot der Zuordnungsseite hilfreich)*
+<img width="902" height="832" alt="image" src="https://github.com/user-attachments/assets/7845e269-40d0-4085-8ffc-808288f362bc" />
+<img width="602" height="532" alt="image" src="https://github.com/user-attachments/assets/468cfe8e-c830-4ad0-8f44-414610f5a5ed" />
 
-5. **Fertigstellung:** Generiere deine Website
+<br> 5. **Fertigstellung:** Generiere deine Website
 - Das Tool erstellt automatisch eine HTML-Website
 - Alle Dateien werden organisiert und verlinkt
 - Optional: ZIP-Export für einfaches Teilen
-*(Hier wäre ein Screenshot der finalen Website hilfreich)*
 
 ## Ordnerstruktur
 Das Tool erstellt automatisch folgende Struktur:
