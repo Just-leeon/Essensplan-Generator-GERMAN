@@ -132,25 +132,50 @@ class MealPlanGenerator:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(2, weight=1)
+        main_frame.rowconfigure(3, weight=1)
         
         # Title
         title_label = ttk.Label(main_frame, text="Gerichte Bibliothek", 
                                font=("Arial", 16, "bold"))
         title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
         
+        # Search and sort controls
+        control_frame = ttk.Frame(main_frame)
+        control_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        control_frame.columnconfigure(1, weight=1)
+        
+        # Search
+        ttk.Label(control_frame, text="Suchen:").grid(row=0, column=0, padx=(0, 5), sticky=tk.W)
+        self.search_var = tk.StringVar()
+        self.search_var.trace('w', lambda *args: self.update_meals_display())
+        search_entry = ttk.Entry(control_frame, textvariable=self.search_var, width=30)
+        search_entry.grid(row=0, column=1, padx=(0, 10), sticky=(tk.W, tk.E))
+        
+        # Sort options
+        ttk.Label(control_frame, text="Sortieren:").grid(row=0, column=2, padx=(0, 5), sticky=tk.W)
+        self.sort_var = tk.StringVar(value="erstellungsdatum")
+        sort_combo = ttk.Combobox(control_frame, textvariable=self.sort_var, 
+                                 values=["erstellungsdatum", "alphabet", "zuletzt_verwendet"], 
+                                 state="readonly", width=15)
+        sort_combo.grid(row=0, column=3, sticky=tk.W)
+        sort_combo.bind('<<ComboboxSelected>>', lambda *args: self.update_meals_display())
+        
         # Meals data folder location
-        ttk.Label(main_frame, text="Speicherort der Gerichte-Datenbank:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="Speicherort der Gerichte-Datenbank:").grid(row=2, column=0, sticky=tk.W, pady=5)
         meals_data_var = tk.StringVar(value=self.meals_data_path)
         meals_data_entry = ttk.Entry(main_frame, textvariable=meals_data_var, width=50)
-        meals_data_entry.grid(row=1, column=1, padx=5, sticky=(tk.W, tk.E))
+        meals_data_entry.grid(row=2, column=1, padx=5, sticky=(tk.W, tk.E))
         ttk.Button(main_frame, text="Durchsuchen", 
-                  command=lambda: self.browse_meals_data_directory(meals_data_var)).grid(row=1, column=2, padx=5)
+                  command=lambda: self.browse_meals_data_directory(meals_data_var)).grid(row=2, column=2, padx=5)
         
         # Create scrollable frame for meals with mouse wheel support
         canvas = tk.Canvas(main_frame)
         scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
+        
+        # Store references for updating display
+        self.meals_canvas = canvas
+        self.meals_scrollable_frame = scrollable_frame
         
         # Bind mouse wheel scrolling
         def on_mousewheel(event):
@@ -172,17 +197,17 @@ class MealPlanGenerator:
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
-        canvas.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
-        scrollbar.grid(row=2, column=2, sticky=(tk.N, tk.S))
+        canvas.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(10, 0))
+        scrollbar.grid(row=3, column=2, sticky=(tk.N, tk.S), pady=(10, 0))
         
-        # Refresh meals display
-        self.refresh_meals_display(scrollable_frame)
+        # Display meals
+        self.update_meals_display()
         
         # Add meal button
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=3, column=0, columnspan=3, pady=20)
+        button_frame.grid(row=4, column=0, columnspan=3, pady=20)
         
-        ttk.Button(button_frame, text="+ Neues Gericht hinzufügen", 
+        ttk.Button(button_frame, text="+ Neues Gericht hinzufügen",
                   command=self.add_new_meal).pack(side=tk.LEFT, padx=5)
         
         ttk.Button(button_frame, text="Weiter zum Essensplan", 
@@ -198,14 +223,44 @@ class MealPlanGenerator:
             self.load_meals_library()  # Reload meals from new location
             self.setup_meal_library_page()  # Refresh display
     
-    def refresh_meals_display(self, parent_frame):
-        """Refresh the display of meals in the library"""
+    def update_meals_display(self):
+        """Update the display of meals based on search and sort criteria"""
         # Clear existing widgets
-        for widget in parent_frame.winfo_children():
+        for widget in self.meals_scrollable_frame.winfo_children():
             widget.destroy()
         
         if not self.meals_library:
-            ttk.Label(parent_frame, text="Noch keine Gerichte vorhanden. Füge dein erstes Gericht hinzu!", 
+            ttk.Label(self.meals_scrollable_frame, text="Noch keine Gerichte vorhanden. Füge dein erstes Gericht hinzu!", 
+                     font=("Arial", 12), foreground="gray").pack(pady=50)
+            return
+        
+        # Get search term
+        search_term = self.search_var.get().lower().strip()
+        
+        # Filter meals based on search
+        filtered_meals = {}
+        for meal_id, meal_data in self.meals_library.items():
+            if (not search_term or 
+                search_term in meal_data['name'].lower() or 
+                search_term in meal_data.get('additional_info', '').lower() or
+                search_term in meal_id.lower()):
+                filtered_meals[meal_id] = meal_data
+        
+        # Sort meals
+        sort_option = self.sort_var.get()
+        if sort_option == "alphabet":
+            # Sort by name alphabetically
+            sorted_meals = sorted(filtered_meals.items(), key=lambda x: x[1]['name'].lower())
+        elif sort_option == "zuletzt_verwendet":
+            # Sort by last used (if available, otherwise by creation order)
+            sorted_meals = sorted(filtered_meals.items(), 
+                                key=lambda x: x[1].get('last_used', ''), reverse=True)
+        else:  # erstellungsdatum (default)
+            # Keep original order from JSON (creation order)
+            sorted_meals = list(filtered_meals.items())
+        
+        if not sorted_meals:
+            ttk.Label(self.meals_scrollable_frame, text="Keine Gerichte gefunden.", 
                      font=("Arial", 12), foreground="gray").pack(pady=50)
             return
         
@@ -214,9 +269,9 @@ class MealPlanGenerator:
         col = 0
         max_cols = 3
         
-        for meal_id, meal_data in self.meals_library.items():
+        for meal_id, meal_data in sorted_meals:
             # Create meal card
-            card_frame = ttk.LabelFrame(parent_frame, text=meal_data['name'], padding="10")
+            card_frame = ttk.LabelFrame(self.meals_scrollable_frame, text=meal_data['name'], padding="10")
             card_frame.grid(row=row, column=col, padx=10, pady=10, sticky=(tk.W, tk.E))
             
             # Image display
@@ -258,7 +313,11 @@ class MealPlanGenerator:
         
         # Configure column weights
         for i in range(max_cols):
-            parent_frame.columnconfigure(i, weight=1)
+            self.meals_scrollable_frame.columnconfigure(i, weight=1)
+        
+        # Update scroll region
+        self.meals_scrollable_frame.update_idletasks()
+        self.meals_canvas.configure(scrollregion=self.meals_canvas.bbox("all"))
     
     def add_new_meal(self):
         """Open dialog to add new meal"""
@@ -281,6 +340,22 @@ class MealPlanGenerator:
         
         main_frame = ttk.Frame(dialog, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Show Meal ID for editing
+        if is_edit:
+            id_frame = ttk.Frame(main_frame)
+            id_frame.pack(fill=tk.X, pady=(0, 15))
+            ttk.Label(id_frame, text="Meal ID:", font=("Arial", 9, "bold")).pack(side=tk.LEFT)
+            id_label = ttk.Label(id_frame, text=meal_id, font=("Arial", 9), foreground="gray")
+            id_label.pack(side=tk.LEFT, padx=(5, 0))
+            
+            # Add copy button for meal ID
+            def copy_meal_id():
+                dialog.clipboard_clear()
+                dialog.clipboard_append(meal_id)
+                messagebox.showinfo("Kopiert", "Meal ID wurde in die Zwischenablage kopiert!")
+            
+            ttk.Button(id_frame, text="📋 Kopieren", command=copy_meal_id).pack(side=tk.RIGHT)
         
         # Name
         ttk.Label(main_frame, text="Name des Gerichts:").pack(anchor=tk.W, pady=(0, 5))
@@ -338,9 +413,47 @@ class MealPlanGenerator:
         button_frame.pack(fill=tk.X, pady=10)
         
         def save_meal():
+            nonlocal meal_id  # Allow access to meal_id from outer scope
+            
             name = name_var.get().strip()
             if not name:
                 messagebox.showerror("Fehler", "Bitte geben Sie einen Namen für das Gericht ein.")
+                return
+            
+            # Check for changes
+            has_changes = False
+            changes_made = []
+            
+            # Check name change
+            if not is_edit or name != meal_data.get('name', ''):
+                has_changes = True
+                changes_made.append("Name")
+            
+            # Check additional info change
+            new_additional_info = info_text.get('1.0', 'end-1c').strip()
+            if not is_edit or new_additional_info != meal_data.get('additional_info', ''):
+                has_changes = True
+                changes_made.append("Zusätzliche Informationen")
+            
+            # Check image path change
+            current_image_path = image_path_var.get()
+            original_image_path = meal_data.get('image_path', '') if is_edit else ''
+            image_changed = current_image_path != original_image_path
+            if image_changed:
+                has_changes = True
+                changes_made.append("Bild")
+            
+            # Check PDF path change
+            current_pdf_path = pdf_path_var.get()
+            original_pdf_path = meal_data.get('pdf_path', '') if is_edit else ''
+            pdf_changed = current_pdf_path != original_pdf_path
+            if pdf_changed:
+                has_changes = True
+                changes_made.append("PDF")
+            
+            # If editing and no changes detected, show message
+            if is_edit and not has_changes:
+                messagebox.showinfo("Information", "Keine Änderungen erkannt. Das Gericht wurde nicht gespeichert.")
                 return
             
             # Create meal data
@@ -348,46 +461,70 @@ class MealPlanGenerator:
                 'name': name,
                 'image_path': '',
                 'pdf_path': '',
-                'additional_info': info_text.get('1.0', 'end-1c').strip()
+                'additional_info': new_additional_info
             }
             
-            # Generate meal ID if new
+            # Generate meal ID if new, otherwise use existing ID
             if not is_edit:
                 meal_id = str(uuid.uuid4())
+            # For editing, meal_id is already available from the function parameter
             
             # Create meal directory
             meal_dir = os.path.join(self.meals_data_path, f"meal_{meal_id}")
             if not os.path.exists(meal_dir):
                 os.makedirs(meal_dir)
             
-            # Copy or cut files if provided
-            if image_path_var.get() and os.path.exists(image_path_var.get()):
-                try:
-                    image_ext = os.path.splitext(image_path_var.get())[1]
-                    new_image_path = os.path.join(meal_dir, f"image{image_ext}")
-                    if self.meal_file_operation.get() == "copy":
-                        shutil.copy2(image_path_var.get(), new_image_path)
-                    else:  # cut
-                        shutil.move(image_path_var.get(), new_image_path)
-                    new_meal_data['image_path'] = new_image_path
-                except Exception as e:
-                    messagebox.showwarning("Warnung", f"Bild konnte nicht {'kopiert' if self.meal_file_operation.get() == 'copy' else 'verschoben'} werden: {str(e)}")
+            # Handle image file only if it has changed
+            if current_image_path and os.path.exists(current_image_path):
+                if image_changed:
+                    try:
+                        image_ext = os.path.splitext(current_image_path)[1]
+                        new_image_path = os.path.join(meal_dir, f"image{image_ext}")
+                        
+                        # Only copy/move if the source is different from destination
+                        if os.path.abspath(current_image_path) != os.path.abspath(new_image_path):
+                            if self.meal_file_operation.get() == "copy":
+                                shutil.copy2(current_image_path, new_image_path)
+                            else:  # cut
+                                shutil.move(current_image_path, new_image_path)
+                        
+                        new_meal_data['image_path'] = new_image_path
+                    except Exception as e:
+                        messagebox.showwarning("Warnung", f"Bild konnte nicht {'kopiert' if self.meal_file_operation.get() == 'copy' else 'verschoben'} werden: {str(e)}")
+                        # Keep the original path if copy/move failed
+                        new_meal_data['image_path'] = current_image_path
+                else:
+                    # No change, keep original path
+                    new_meal_data['image_path'] = current_image_path
             elif is_edit:
-                new_meal_data['image_path'] = meal_data.get('image_path', '')
+                # Keep existing image path if no new image provided
+                new_meal_data['image_path'] = original_image_path
             
-            if pdf_path_var.get() and os.path.exists(pdf_path_var.get()):
-                try:
-                    pdf_ext = os.path.splitext(pdf_path_var.get())[1]
-                    new_pdf_path = os.path.join(meal_dir, f"recipe{pdf_ext}")
-                    if self.meal_file_operation.get() == "copy":
-                        shutil.copy2(pdf_path_var.get(), new_pdf_path)
-                    else:  # cut
-                        shutil.move(pdf_path_var.get(), new_pdf_path)
-                    new_meal_data['pdf_path'] = new_pdf_path
-                except Exception as e:
-                    messagebox.showwarning("Warnung", f"PDF konnte nicht {'kopiert' if self.meal_file_operation.get() == 'copy' else 'verschoben'} werden: {str(e)}")
+            # Handle PDF file only if it has changed
+            if current_pdf_path and os.path.exists(current_pdf_path):
+                if pdf_changed:
+                    try:
+                        pdf_ext = os.path.splitext(current_pdf_path)[1]
+                        new_pdf_path = os.path.join(meal_dir, f"recipe{pdf_ext}")
+                        
+                        # Only copy/move if the source is different from destination
+                        if os.path.abspath(current_pdf_path) != os.path.abspath(new_pdf_path):
+                            if self.meal_file_operation.get() == "copy":
+                                shutil.copy2(current_pdf_path, new_pdf_path)
+                            else:  # cut
+                                shutil.move(current_pdf_path, new_pdf_path)
+                        
+                        new_meal_data['pdf_path'] = new_pdf_path
+                    except Exception as e:
+                        messagebox.showwarning("Warnung", f"PDF konnte nicht {'kopiert' if self.meal_file_operation.get() == 'copy' else 'verschoben'} werden: {str(e)}")
+                        # Keep the original path if copy/move failed
+                        new_meal_data['pdf_path'] = current_pdf_path
+                else:
+                    # No change, keep original path
+                    new_meal_data['pdf_path'] = current_pdf_path
             elif is_edit:
-                new_meal_data['pdf_path'] = meal_data.get('pdf_path', '')
+                # Keep existing PDF path if no new PDF provided
+                new_meal_data['pdf_path'] = original_pdf_path
             
             # Save to library
             self.meals_library[meal_id] = new_meal_data
@@ -396,8 +533,21 @@ class MealPlanGenerator:
             # Clean up temporary files after successful save
             self.cleanup_temp_meal_files()
             
+            # Show success message with what was changed
+            if is_edit:
+                if changes_made:
+                    messagebox.showinfo("Erfolg", f"Gericht wurde erfolgreich aktualisiert!\nGeänderte Bereiche: {', '.join(changes_made)}")
+                else:
+                    messagebox.showinfo("Information", "Gericht wurde gespeichert (keine Änderungen erkannt).")
+            else:
+                messagebox.showinfo("Erfolg", "Neues Gericht wurde erfolgreich hinzugefügt!")
+            
             dialog.destroy()
-            self.setup_meal_library_page()  # Refresh display
+            # Check if we have the attributes needed for updating display
+            if hasattr(self, 'meals_scrollable_frame') and hasattr(self, 'update_meals_display'):
+                self.update_meals_display()  # Refresh display
+            else:
+                self.setup_meal_library_page()  # Fallback for full refresh
         
         def cancel_meal():
             """Cancel and clean up temporary files"""
@@ -566,7 +716,7 @@ class MealPlanGenerator:
             # Remove from library
             del self.meals_library[meal_id]
             self.save_meals_library()
-            self.setup_meal_library_page()  # Refresh display
+            self.update_meals_display()  # Refresh display
     
     def setup_page1(self):
         """Configuration page"""
