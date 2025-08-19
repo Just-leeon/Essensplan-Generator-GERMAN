@@ -119,6 +119,60 @@ class MealPlanGenerator:
         except Exception as e:
             messagebox.showerror("Fehler", f"Fehler beim Speichern der Gerichte: {str(e)}")
     
+    def update_meal_file_paths(self, old_meals_path, new_meals_path):
+        """Update file paths in meals library when meals_data directory changes"""
+        if not self.meals_library:
+            return
+            
+        updated_count = 0
+        
+        for meal_id, meal_data in self.meals_library.items():
+            meal_updated = False
+            
+            # Update image path
+            if meal_data.get('image_path'):
+                old_image_path = meal_data['image_path']
+                # Find "meals_data" in the path and replace everything before it
+                if "meals_data" in old_image_path:
+                    # Find the position of "meals_data"
+                    meals_data_index = old_image_path.find("meals_data")
+                    # Get everything from "meals_data" onwards
+                    path_from_meals_data = old_image_path[meals_data_index:]
+                    # Create new path by combining new base path with path from meals_data
+                    new_base_path = os.path.dirname(new_meals_path)  # Get parent directory of meals_data
+                    new_image_path = os.path.join(new_base_path, path_from_meals_data)
+                    meal_data['image_path'] = new_image_path
+                    meal_updated = True
+            
+            # Update PDF path
+            if meal_data.get('pdf_path'):
+                old_pdf_path = meal_data['pdf_path']
+                # Find "meals_data" in the path and replace everything before it
+                if "meals_data" in old_pdf_path:
+                    # Find the position of "meals_data"
+                    meals_data_index = old_pdf_path.find("meals_data")
+                    # Get everything from "meals_data" onwards
+                    path_from_meals_data = old_pdf_path[meals_data_index:]
+                    # Create new path by combining new base path with path from meals_data
+                    new_base_path = os.path.dirname(new_meals_path)  # Get parent directory of meals_data
+                    new_pdf_path = os.path.join(new_base_path, path_from_meals_data)
+                    meal_data['pdf_path'] = new_pdf_path
+                    meal_updated = True
+            
+            if meal_updated:
+                updated_count += 1
+        
+        # Save updated library to new location
+        if updated_count > 0:
+            new_library_file = os.path.join(new_meals_path, "meals_library.json")
+            try:
+                with open(new_library_file, 'w', encoding='utf-8') as f:
+                    json.dump(self.meals_library, f, ensure_ascii=False, indent=2)
+                messagebox.showinfo("Pfade aktualisiert", 
+                                  f"Dateipfade von {updated_count} Gericht(en) wurden an den neuen Speicherort angepasst.")
+            except Exception as e:
+                messagebox.showerror("Fehler", f"Fehler beim Aktualisieren der Dateipfade: {str(e)}")
+    
     def setup_meal_library_page(self):
         """New start page for meal library management"""
         # Clear window
@@ -218,8 +272,13 @@ class MealPlanGenerator:
         directory = filedialog.askdirectory(title="Gerichte-Datenbank Ordner auswählen", 
                                           initialdir=self.meals_data_path)
         if directory:
+            old_meals_data_path = self.meals_data_path
             self.meals_data_path = directory
             path_var.set(directory)
+            
+            # Update file paths in existing meals library before reloading
+            self.update_meal_file_paths(old_meals_data_path, directory)
+            
             self.load_meals_library()  # Reload meals from new location
             self.setup_meal_library_page()  # Refresh display
     
